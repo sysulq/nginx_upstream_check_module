@@ -1,0 +1,83 @@
+diff --git i/ngx_http_upstream_hash_module.c w/ngx_http_upstream_hash_module.c
+index 2b5cff4..743a3a0 100644
+--- i/ngx_http_upstream_hash_module.c
++++ w/ngx_http_upstream_hash_module.c
+@@ -11,10 +11,6 @@
+ #include <ngx_core.h>
+ #include <ngx_http.h>
+ 
+-#if (NGX_HTTP_HEALTHCHECK)
+-#include <ngx_http_healthcheck_module.h>
+-#endif
+-
+ #define ngx_bitvector_index(index) (index / (8 * sizeof(uintptr_t)))
+ #define ngx_bitvector_bit(index) ((uintptr_t) 1 << (index % (8 * sizeof(uintptr_t))))
+ 
+@@ -32,8 +28,8 @@ typedef struct {
+     ngx_str_t                       name;
+     ngx_uint_t                      down;
+     ngx_int_t                       weight;
+-#if (NGX_HTTP_HEALTHCHECK)
+-    ngx_int_t                       health_index;
++#if (NGX_HTTP_UPSTREAM_CHECK)
++    ngx_int_t                       check_index;
+ #endif
+ #if (NGX_HTTP_SSL)
+     ngx_ssl_session_t              *ssl_session;   /* local to a process */
+@@ -164,9 +160,7 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
+     ngx_uint_t                       i, j, n, w;
+     ngx_http_upstream_server_t      *server;
+     ngx_http_upstream_hash_peers_t  *peers;
+-#if (NGX_HTTP_HEALTHCHECK)
+-    ngx_int_t                        health_index;
+-#endif
++
+     us->peer.init = ngx_http_upstream_init_hash_peer;
+ 
+     if (!us->servers) {
+@@ -211,15 +205,14 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
+             peers->peer[n].name = server[i].addrs[j].name;
+             peers->peer[n].down = server[i].down;
+             peers->peer[n].weight = server[i].weight;
+-#if (NGX_HTTP_HEALTHCHECK)
++
++#if (NGX_HTTP_UPSTREAM_CHECK)
+             if (!server[i].down) {
+-                health_index =
+-                    ngx_http_healthcheck_add_peer(us,
+-                    &server[i].addrs[j], cf->pool);
+-                if (health_index == NGX_ERROR) {
+-                    return NGX_ERROR;
+-                }
+-                peers->peer[n].health_index = health_index;
++                peers->peer[n].check_index =
++                    ngx_http_upstream_check_add_peer(cf, us,
++                                                     &server[i].addrs[j]);
++            } else {
++                peers->peer[n].check_index = (ngx_int_t) NGX_ERROR;
+             }
+ #endif
+             n++;
+@@ -429,11 +422,18 @@ static void ngx_http_upstream_hash_next_peer(ngx_http_upstream_hash_peer_data_t
+     // the current peer isn't marked down
+     while ((*tries)-- && (
+        (uhpd->tried[ngx_bitvector_index(current)] & ngx_bitvector_bit(current))
+-        || uhpd->peers->peer[current].down
+-#if (NGX_HTTP_HEALTHCHECK)
+-        || ngx_http_healthcheck_is_down(uhpd->peers->peer[current].health_index, log)
++        || uhpd->peers->peer[current].down)) {
++
++#if (NGX_HTTP_UPSTREAM_CHECK)
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, pc->log, 0,
++                       "get hash peer, check_index: %ui",
++                       peer->check_index);
++
++        if (ngx_http_upstream_check_peer_down(uhpd->peers->peer[current].check_index)) {
++            continue;
++        }
+ #endif
+-        )) {
++
+        uhpd->current_key.len = ngx_sprintf(uhpd->current_key.data, "%d%V",
+            ++uhpd->try_i, &uhpd->original_key) - uhpd->current_key.data;
+        uhpd->hash += ngx_http_upstream_hash_crc32(uhpd->current_key.data,
