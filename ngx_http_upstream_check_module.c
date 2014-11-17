@@ -4,6 +4,7 @@
  */
 
 
+#include <nginx.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <ngx_config.h>
@@ -875,7 +876,11 @@ ngx_http_upstream_check_addr_change_port(ngx_pool_t *pool, ngx_addr_t *dst,
         return NGX_ERROR;
     }
 
+#if (nginx_version >= 1005003)
+    len = ngx_sock_ntop(dst->sockaddr, dst->socklen, p, len, 1);
+#else
     len = ngx_sock_ntop(dst->sockaddr, p, len, 1);
+#endif
 
     dst->name.len = len;
     dst->name.data = p;
